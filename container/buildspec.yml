@@ -1,0 +1,12 @@
+version: 0.2
+phases:
+  pre_build:
+    commands:
+      - REGISTRY="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS --password-stdin "$REGISTRY"
+  build:
+    commands:
+      - docker build --platform linux/amd64 -t "${REGISTRY}/${ECR_REPO_NAME}:${IMAGE_TAG}" .
+  post_build:
+    commands:
+      - docker push "${REGISTRY}/${ECR_REPO_NAME}:${IMAGE_TAG}"

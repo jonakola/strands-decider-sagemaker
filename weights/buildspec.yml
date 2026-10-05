@@ -1,0 +1,35 @@
+# Stages pinned model weights to S3 as an uncompressed SageMaker model prefix.
+# Layout at s3://$BUCKET/$PREFIX/:
+#   checkpoint/  StrandsAgents/strands-decider-2B-hobson-v19 @ $CKPT_REV, config rewritten
+#                so base_model points at /opt/ml/model/base (no Hub access at runtime)
+#   base/        Qwen/Qwen3.5-2B-Base @ $BASE_REV (revision recorded in provenance.json)
+version: 0.2
+phases:
+  install:
+    commands:
+      - pip install --quiet "huggingface_hub==1.5.0"
+  build:
+    commands:
+      - |
+        python3 - <<'PY'
+        import json, os, shutil
+        from huggingface_hub import snapshot_download
+        ckpt = snapshot_download("StrandsAgents/strands-decider-2B-hobson-v19",
+                                 revision=os.environ["CKPT_REV"], local_dir="/tmp/model/checkpoint")
+        base = snapshot_download("Qwen/Qwen3.5-2B-Base",
+                                 revision=os.environ["BASE_REV"], local_dir="/tmp/model/base")
+        for d in ("/tmp/model/checkpoint/.cache", "/tmp/model/base/.cache"):
+            shutil.rmtree(d, ignore_errors=True)
+        # The published v19 uses the legacy config name.
+        cfg_path = next(p for p in ("/tmp/model/checkpoint/strands_decider_config.json",
+                                    "/tmp/model/checkpoint/hobson_config.json") if os.path.exists(p))
+        shutil.copy(cfg_path, cfg_path + ".orig")
+        cfg = json.load(open(cfg_path))
+        assert cfg["base_model"] == "Qwen/Qwen3.5-2B-Base", cfg["base_model"]
+        cfg["base_model"] = "/opt/ml/model/base"
+        json.dump(cfg, open(cfg_path, "w"), indent=2)
+        print("rewrote", cfg_path)
+        PY
+      - du -sh /tmp/model/*
+      - aws s3 sync /tmp/model "s3://${BUCKET}/${PREFIX}/" --delete --only-show-errors
+      - aws s3 ls --recursive "s3://${BUCKET}/${PREFIX}/" | head -50
